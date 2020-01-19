@@ -1,0 +1,101 @@
+#include <fcntl.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "md5.h" 
+
+int key; // symmetric key
+int buf, n, infile, outfile;
+
+MD5_CTX mdContext;  // needed to compute MD5
+
+encrypt(char *name)
+{ 
+  struct stat st;
+  int size,i,j;
+  int *temp, result;   
+  int rollingkey;    
+  // priliminaries, get files ready and sized
+  infile = open (name, O_RDONLY);
+  if (infile<0) { printf("input file %s open error\n", name); exit(0); }
+  
+  outfile = open ("output-enc.txt", O_RDWR|O_CREAT|O_TRUNC, 0700);
+  if (outfile<0) { printf("Cannot access file: output\n"); exit(0); }
+  
+  //stat(name, &st); size = st.st_size;
+  //if (size <4) {printf("input file too small\n"); exit(0);}; 
+  write(outfile,&key,4); // write input file size to output
+  
+  // do the encryption, buf contains plaintext, and rollingkey contains key
+  buf = 0;
+  rollingkey = key;  
+  while ((n = read(infile, &buf, 4)) > 0 ) {
+        // buf = buf ^ rollingkey; //XOR with key, and put ciphertext in buf
+   MD5Init(&mdContext);  // compute MD5 of rollingkey
+   MD5Update(&mdContext, &rollingkey, 4);
+   MD5Final(&mdContext);
+   temp = (int *) &mdContext.digest[12]; 
+   result = *temp; // result is 32 bits of MD5 of buf
+   
+   rollingkey = rollingkey ^ result; // new key
+   write(outfile, &buf, 4);  // write ciphertext
+   buf = 0; // rinse and repeat
+  };
+  close(infile); close(outfile);
+  return(size);
+};
+
+mykeygen() // generate a key, from system entropy
+{ 
+  int fd = open("/dev/urandom", O_RDONLY);
+  read(fd, &buf, 4);
+  return(buf);
+}
+
+calculateMD5(char* filename)
+{
+	unsigned char c[16];
+	int i, result, * temp;
+	int bytes = 10;
+	long filesize;
+	//char* buffer = NULL;
+	//char* filemd5 = (char*)malloc(33 * sizeof(char));
+
+	FILE* efile = fopen(filename, "rb");
+	if (efile == 0)
+	{
+		perror(filename);
+		return 0;
+	}
+	fseek(efile, 0, SEEK_END);
+	filesize = ftell(efile);
+	rewind(efile);
+
+	char* buf = (char*)malloc(sizeof(char) * filesize);
+
+	MD5Init(&mdContext);
+	bytes = fread(buf, 1, filesize, efile);
+	while (bytes != 0)
+	{
+		MD5Update(&mdContext, buf, bytes);
+		MD5Final(&mdContext);
+		temp = (int*)& mdContext.digest[12];
+		result = *temp;
+		printf("calculated md5 for %s is %x\n", filename, result);
+		break;
+	}
+	fclose(efile);
+}
+
+int main()
+{
+	char filename[1024];
+	printf("enter the filename\n");
+	scanf("%s", &filename);
+	key = mykeygen();
+	printf ("key: %x  <needed for decryption>\n", key);
+
+	encrypt(filename);
+	
+	calculateMD5("output-enc.txt");
+	return 0;
+}
